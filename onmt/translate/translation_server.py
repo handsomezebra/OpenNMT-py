@@ -144,16 +144,7 @@ class TranslationServer(object):
 
         return model_id
 
-    def run(self, inputs):
-        """Translate `inputs`
-
-        We keep the same format as the Lua version i.e.
-        ``[{"id": model_id, "src": "sequence to translate"},{ ...}]``
-
-        We use inputs[0]["id"] as the model id
-        """
-
-        model_id = inputs[0].get("id", 0)
+    def run(self, model_id, inputs):
         if model_id in self.models and self.models[model_id] is not None:
             return self.models[model_id].run(inputs)
         else:
@@ -205,8 +196,6 @@ class ServerModel(object):
                  on_timeout="to_cpu", model_root="./"):
         self.model_root = model_root
         self.opt = self.parse_opt(opt)
-        if self.opt.n_best > 1:
-            raise ValueError("Values of n_best > 1 are not supported")
 
         self.model_id = model_id
         self.preprocess_opt = preprocess_opt
@@ -356,7 +345,7 @@ class ServerModel(object):
         """Translate `inputs` using this model
 
         Args:
-            inputs (List[dict[str, str]]): [{"src": "..."},{"src": ...}]
+            inputs (List[str]): ["...", "..."]
 
         Returns:
             result (list): translations
@@ -390,8 +379,7 @@ class ServerModel(object):
         head_spaces = []
         tail_spaces = []
         sslength = []
-        for i, inp in enumerate(inputs):
-            src = inp['src']
+        for i, src in enumerate(inputs):
             if src.strip() == "":
                 head_spaces.append(src)
                 texts.append("")
@@ -440,25 +428,22 @@ class ServerModel(object):
                                             timer.times['translation']))
         self.reset_unload_timer()
 
-        # NOTE: translator returns lists of `n_best` list
-        #       we can ignore that (i.e. flatten lists) only because
-        #       we restrict `n_best=1`
-        def flatten_list(_list): return sum(_list, [])
-        results = flatten_list(predictions)
-        scores = [score_tensor.item()
-                  for score_tensor in flatten_list(scores)]
+        results = predictions
+        scores = [[score_tensor.item()
+                  for score_tensor in score_list] for score_list in scores]
 
-        results = [self.maybe_detokenize(item)
-                   for item in results]
+        results = [[self.maybe_detokenize(item)
+                   for item in result_list] for result_list in results]
 
-        results = [self.maybe_postprocess(item)
-                   for item in results]
+        results = [[self.maybe_postprocess(item)
+                   for item in result_list] for result_list in results]
+
         # build back results with empty texts
         for i in empty_indices:
-            results.insert(i, "")
-            scores.insert(i, 0)
+            results.insert(i, [""])
+            scores.insert(i, [0])
 
-        results = ["".join(items)
+        results = [["".join([items[0], r, items[2]]) for r in items[1]]
                    for items in zip(head_spaces, results, tail_spaces)]
 
         self.logger.info("Translation Results: %d", len(results))

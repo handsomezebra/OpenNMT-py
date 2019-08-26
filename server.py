@@ -72,17 +72,17 @@ def start(config_file,
 
     @app.route('/translate', methods=['POST'])
     def translate():
-        inputs = request.get_json(force=True)
+        input_json = request.get_json(force=True)
         out = {}
         try:
-            translation, scores, n_best, times = translation_server.run(inputs)
+            model_id = input_json["id"]
+            inputs = input_json["src"]
+            translation, scores, n_best, times = translation_server.run(model_id, inputs)
             assert len(translation) == len(inputs)
             assert len(scores) == len(inputs)
 
-            out = [[{"src": inputs[i]['src'], "tgt": translation[i],
-                     "n_best": n_best,
-                     "pred_score": scores[i]}
-                    for i in range(len(translation))]]
+            out = [{"src": inputs[i], "tgt": translation[i], "n_best": n_best, "pred_score": scores[i]}
+                    for i in range(len(translation))]
         except ServerModelError as e:
             out['error'] = str(e)
             out['status'] = STATUS_ERROR
